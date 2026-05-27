@@ -1,7 +1,9 @@
 <?php
 /**
  * Plugin Name:       Web Vault
- * Plugin URI:        https://coozmoo.webvault.me/
+ * Plugin URI:        https://github.com/nareshwaghela/web-vault
+ * GitHub Plugin URI: https://github.com/nareshwaghela/web-vault
+ * GitHub Branch:     main
  * Description:       Connects your WordPress site to the central management dashboard. Supports secure auto-login, REST API authentication, and SSL bypass for HTTP-only environments.
  * Version:           1.4.0
  * Requires at least: 5.8
@@ -833,3 +835,82 @@ register_activation_hook( WEB_VAULT_FILE, function () {
 register_deactivation_hook( WEB_VAULT_FILE, function () {
 	// Intentionally left blank — token is preserved across deactivations.
 } );
+
+// ===========================================================
+// GitHub Auto-Updater
+// ===========================================================
+
+add_filter( 'pre_set_site_transient_update_plugins', function ( $transient ) {
+    if ( empty( $transient->checked ) ) {
+        return $transient;
+    }
+
+    $github_user = 'nareshwaghela';
+    $github_repo = 'web-vault';
+    $plugin_slug = 'web-vault/web-vault.php';
+
+    $response = wp_remote_get(
+        "https://api.github.com/repos/{$github_user}/{$github_repo}/releases/latest",
+        array(
+            'headers'   => array( 'Accept' => 'application/vnd.github.v3+json' ),
+            'sslverify' => false,
+            'timeout'   => 10,
+        )
+    );
+
+    if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+        return $transient;
+    }
+
+    $release      = json_decode( wp_remote_retrieve_body( $response ) );
+    $github_ver   = ltrim( $release->tag_name ?? '', 'v' );
+    $current_ver  = $transient->checked[ $plugin_slug ] ?? WEB_VAULT_VERSION;
+
+    if ( version_compare( $github_ver, $current_ver, '>' ) ) {
+        $zip_url = "https://github.com/{$github_user}/{$github_repo}/archive/refs/heads/main.zip";
+
+        $transient->response[ $plugin_slug ] = (object) array(
+            'slug'        => 'web-vault',
+            'plugin'      => $plugin_slug,
+            'new_version' => $github_ver,
+            'url'         => "https://github.com/{$github_user}/{$github_repo}",
+            'package'     => $zip_url,
+        );
+    }
+
+    return $transient;
+} );
+
+add_filter( 'plugins_api', function ( $result, $action, $args ) {
+    if ( 'plugin_information' !== $action || 'web-vault' !== ( $args->slug ?? '' ) ) {
+        return $result;
+    }
+
+    return (object) array(
+        'name'          => 'Web Vault',
+        'slug'          => 'web-vault',
+        'version'       => WEB_VAULT_VERSION,
+        'author'        => '<a href="https://coozmoo.webvault.me/author/naresh-waghela/">Naresh Waghela</a>',
+        'homepage'      => 'https://github.com/nareshwaghela/web-vault',
+        'download_link' => 'https://github.com/nareshwaghela/web-vault/archive/refs/heads/main.zip',
+        'sections'      => array(
+            'description' => 'Connects your WordPress site to the Web Vault central management dashboard.',
+        ),
+    );
+}, 10, 3 );
+
+add_filter( 'upgrader_source_selection', function ( $source, $remote_source, $upgrader ) {
+    global $wp_filesystem;
+
+    if ( ! isset( $upgrader->skin->plugin ) || 'web-vault/web-vault.php' !== $upgrader->skin->plugin ) {
+        return $source;
+    }
+
+    $corrected = trailingslashit( $remote_source ) . 'web-vault/';
+    if ( $wp_filesystem->is_dir( $source ) && ! $wp_filesystem->is_dir( $corrected ) ) {
+        $wp_filesystem->move( $source, $corrected );
+        return $corrected;
+    }
+
+    return $source;
+}, 10, 3 );
